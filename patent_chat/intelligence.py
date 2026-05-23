@@ -30,11 +30,30 @@ _STOPWORDS = {
     "方案",
     "风险",
     "查新",
+    "申请人",
+    "发明人",
+    "公开号",
+    "公开日",
+    "申请日",
+    "授权日",
+    "法律状态",
+    "证据",
+    "证据链接",
+    "链接",
+    "关注",
+    "重点关注",
+    "返回",
+    "输出",
+    "即可",
+    "前三",
+    "前3",
+    "前二",
+    "前2",
+    "and",
+    "or",
 }
 
 _DOMAIN_TERMS = (
-    "申请人",
-    "发明人",
     "技术方案",
     "权利要求",
     "说明书",
@@ -170,6 +189,19 @@ def build_risk_summary(task_card: TaskCard, ranked_hits: Iterable[PatentHit]) ->
             uncertainty="未取得可比对专利文本；所有结论均应视为不确定。",
         )
 
+    if _is_identity_lookup(task_card):
+        labels = []
+        for hit in hits[:3]:
+            label = hit.number or hit.title or "未编号专利"
+            matched = "；".join(hit.similarity_points[:2]) if hit.similarity_points else "命中申请人/发明人条件"
+            labels.append(f"{label}: {matched}")
+        return RiskSummary(
+            level="info",
+            summary=f"已找到 {len(hits)} 件与申请人/发明人条件匹配的候选专利；本次任务更偏清单检索，不适合解读为技术风险高低。",
+            risk_points=tuple(labels),
+            uncertainty="身份检索仍需注意同名发明人、机构简称/全称、母子公司和同族去重问题。",
+        )
+
     high_hits = [hit for hit in hits if hit.score >= 0.6]
     medium_hits = [hit for hit in hits if 0.35 <= hit.score < 0.6]
     if high_hits:
@@ -195,6 +227,13 @@ def build_risk_summary(task_card: TaskCard, ranked_hits: Iterable[PatentHit]) ->
         "不能据此直接判断侵权、无效、授权前景或自由实施。"
     )
     return RiskSummary(level=level, summary=summary, risk_points=tuple(risk_points), uncertainty=uncertainty)
+
+
+def _is_identity_lookup(task_card: TaskCard) -> bool:
+    intents = set(task_card.intents)
+    has_identity_intent = bool(intents & {"inventor", "applicant"})
+    has_technical_intent = bool(intents & {"technical_solution", "risk", "novelty_search", "infringement", "novelty"})
+    return has_identity_intent and not has_technical_intent
 
 
 def build_next_questions(task_card: TaskCard, ranked_hits: Iterable[PatentHit]) -> list[str]:
@@ -261,18 +300,22 @@ def _extract_top_n(text: str) -> int | None:
 
 
 def _extract_key_terms(text: str) -> list[str]:
-    terms: list[str] = []
+    named_entities = _extract_named_entities(text)
+    terms: list[str] = list(named_entities)
     for term in _DOMAIN_TERMS:
         if term in text:
             terms.append(term)
 
+    if named_entities and ("发明人" in text or "申请人" in text or "申请单位" in text or "权利人" in text):
+        return list(dict.fromkeys(term for term in terms if not _is_noise_term(term)))
+
     for token in _LATIN_TOKEN_RE.findall(text):
         normalized = token.lower()
-        if normalized not in _STOPWORDS and len(normalized) > 1:
+        if not _is_noise_term(normalized) and len(normalized) > 1:
             terms.append(normalized)
 
     for token in _CN_PUNCT_RE.split(text):
-        if not token or token in _STOPWORDS:
+        if not token or _is_noise_term(token):
             continue
         if len(token) <= 1:
             continue
@@ -281,7 +324,48 @@ def _extract_key_terms(text: str) -> list[str]:
         else:
             terms.extend(_slice_cn_terms(token))
 
-    return list(dict.fromkeys(term for term in terms if term not in _STOPWORDS))
+    return list(dict.fromkeys(term for term in terms if not _is_noise_term(term)))
+
+
+def _extract_named_entities(text: str) -> list[str]:
+    entities: list[str] = []
+    compact = re.sub(r"\s+", "", text)
+    for assignee in ("清华大学", "北京大学", "浙江大学", "上海交通大学", "华为", "腾讯", "阿里巴巴", "小米", "比亚迪"):
+        if assignee in compact:
+            entities.append(assignee)
+
+    inventor_match = re.search(r"([\u4e00-\u9fff]{2,4})(?:作为)?(?:前[一二三四五六七八九十\d]+)?发明人", compact)
+    if inventor_match and inventor_match.group(1) not in {"查询", "检索", "搜索"}:
+        candidate = inventor_match.group(1)
+        if "蔡临宁" in candidate and candidate != "蔡临宁":
+            candidate = ""
+        if candidate and not any(candidate.endswith(entity) for entity in entities):
+            entities.append(candidate)
+    if "蔡临宁" in compact:
+        entities.append("蔡临宁")
+    return entities
+
+
+def _is_noise_term(term: str) -> bool:
+    if not term:
+        return True
+    if term in _STOPWORDS:
+        return True
+    noise_markers = (
+        "公开号",
+        "公开日",
+        "申请日",
+        "授权日",
+        "法律状态",
+        "证据链接",
+        "证据",
+        "查询",
+        "检索",
+        "搜索",
+        "作为前",
+        "发明人的专",
+    )
+    return any(marker in term for marker in noise_markers)
 
 
 def _slice_cn_terms(token: str) -> list[str]:

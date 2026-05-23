@@ -4,6 +4,7 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>智慧芽专利情报工作台</title>
+    <link rel="icon" href="data:," />
     <link rel="stylesheet" href="/static/styles.css" />
   </head>
   <body>
@@ -36,6 +37,24 @@
                 <button type="button" class="example-button" data-example="hydrogen">氢气瓶缠绕与泄压阀</button>
                 <button type="button" class="example-button" data-example="raw">raw 专家检索式</button>
               </div>
+            </div>
+
+            <div class="guide-block config-block">
+              <h2>本地配置</h2>
+              <p id="config-summary" class="help-text">正在读取本地配置...</p>
+              <label for="config-main-url">专利搜索 MCP</label>
+              <input id="config-main-url" type="text" autocomplete="off" />
+              <label for="config-main-key">API Key</label>
+              <input id="config-main-key" type="password" placeholder="只在需要更新时粘贴" autocomplete="off" />
+              <label for="config-novelty-url">查新 MCP</label>
+              <input id="config-novelty-url" type="text" autocomplete="off" />
+              <label for="config-novelty-key">查新 Key</label>
+              <input id="config-novelty-key" type="password" placeholder="留空则沿用主 Key" autocomplete="off" />
+              <div class="mini-actions">
+                <button id="save-config-button" type="button">保存并检测</button>
+                <button id="self-test-button" type="button" class="secondary-button">一键自检</button>
+              </div>
+              <div id="config-status" class="mini-status" role="status" aria-live="polite"></div>
             </div>
 
             <div class="guide-block">

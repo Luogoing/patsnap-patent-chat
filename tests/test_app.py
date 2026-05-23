@@ -9,6 +9,16 @@ def test_build_mcp_query_keeps_raw_query_direct():
     assert _build_mcp_query(card) == "TACD: hydrogen storage tank"
 
 
+def test_build_mcp_query_simplifies_identity_lookup():
+    card = build_task_card(
+        "查询清华大学蔡临宁作为前三发明人的专利",
+        "关注公开号、申请人、发明人、公开日、法律状态和证据链接。",
+        "balanced",
+    )
+
+    assert _build_mcp_query(card) == "清华大学 蔡临宁"
+
+
 def test_intelligence_error_response_has_required_schema_and_redacts_secret():
     card = build_task_card("查询清华大学蔡临宁作为前三发明人的专利", mode="balanced")
     risk = build_risk_summary(card, [])

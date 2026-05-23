@@ -22,7 +22,7 @@ from .intelligence import (
     rank_patents,
 )
 from .normalizer import google_patents_url
-from .zhihuiya_mcp import ZhihuiyaMCPClient, redact_secret
+from .zhihuiya_mcp import ZhihuiyaMCPClient, clean_mcp_url_and_key, redact_secret
 
 
 STATIC_DIR = ROOT / "static"
@@ -51,6 +51,18 @@ class IntelligenceRequest(BaseModel):
     mode: str = "balanced"
     limit: int = Field(default=10, ge=1, le=50)
     context: str = ""
+
+
+class LocalConfigRequest(BaseModel):
+    zhihuiya_mcp_url: str = ""
+    zhihuiya_mcp_api_key: str = ""
+    zhihuiya_novelty_mcp_url: str = ""
+    zhihuiya_novelty_mcp_api_key: str = ""
+
+
+class SelfTestRequest(BaseModel):
+    cases: list[str] = Field(default_factory=lambda: ["tsinghua", "raw"])
+    limit: int = Field(default=3, ge=1, le=10)
 
 
 app = FastAPI(title="Zhihuiya MCP Patent Intelligence", version="1.0.0")
@@ -96,6 +108,25 @@ async def api_health() -> dict[str, Any]:
     }
 
 
+@app.get("/api/config")
+async def api_config() -> dict[str, Any]:
+    settings = get_settings()
+    return _public_config(settings)
+
+
+@app.post("/api/config")
+async def save_local_config(request: LocalConfigRequest) -> dict[str, Any]:
+    settings = get_settings()
+    saved = _save_local_config(request, settings)
+    health_payload = await api_health()
+    return {
+        "ok": True,
+        "saved": saved,
+        "config": _public_config(get_settings()),
+        "health": health_payload,
+    }
+
+
 @app.post("/api/intelligence")
 async def intelligence(request: IntelligenceRequest) -> dict[str, Any]:
     return await run_intelligence(
@@ -129,6 +160,34 @@ async def chat(request: ChatRequest) -> ChatResponse:
     )
 
 
+@app.post("/api/self-test")
+async def self_test(request: SelfTestRequest) -> dict[str, Any]:
+    trace_id = uuid4().hex
+    health_payload = await api_health()
+    results = []
+    for case in request.cases[:5]:
+        payload = _self_test_case(case, request.limit)
+        report = await run_intelligence(**payload)
+        patents = report.get("patents") or []
+        results.append(
+            {
+                "case": case,
+                "ok": bool(report.get("ok")) and bool(patents),
+                "patents": len(patents),
+                "evidence": len(report.get("evidence") or []),
+                "trace_id": report.get("trace_id", ""),
+                "error": report.get("error", ""),
+            }
+        )
+
+    return {
+        "ok": bool(health_payload.get("ok")) and all(item["ok"] for item in results),
+        "trace_id": trace_id,
+        "health": health_payload,
+        "results": results,
+    }
+
+
 async def run_intelligence(question: str, mode: str = "balanced", limit: int = 10, context: str = "") -> dict[str, Any]:
     trace_id = uuid4().hex
     safe_limit = _clamp_limit(limit)
@@ -141,6 +200,10 @@ async def run_intelligence(question: str, mode: str = "balanced", limit: int = 1
     selected_client = primary
     if _should_fallback_to_novelty(mcp_response, settings, task_card.mode):
         fallback = _novelty_client(settings)
+        mcp_response = await fallback.search(query=query, limit=safe_limit)
+        selected_client = fallback
+    elif _should_fallback_to_patent_search(mcp_response, settings, selected_client.channel):
+        fallback = _patent_search_client(settings)
         mcp_response = await fallback.search(query=query, limit=safe_limit)
         selected_client = fallback
 
@@ -260,10 +323,21 @@ def _should_fallback_to_novelty(response: dict[str, Any], settings: Settings, mo
     if (mode or "").lower() in {"novelty", "infringement", "risk"}:
         return False
     error = response.get("error") or {}
-    if error.get("code") not in {"permission_denied", "tool_not_found"}:
+    if error.get("code") not in {"permission_denied", "tool_not_found", "timeout", "invalid_response", "connection_failed"}:
         return False
     novelty_key = settings.zhihuiya_novelty_mcp_api_key or settings.zhihuiya_mcp_api_key
     return bool(settings.zhihuiya_novelty_mcp_url and novelty_key)
+
+
+def _should_fallback_to_patent_search(response: dict[str, Any], settings: Settings, channel: str) -> bool:
+    if response.get("ok"):
+        return False
+    if channel == "patent_search":
+        return False
+    error = response.get("error") or {}
+    if error.get("code") not in {"permission_denied", "tool_not_found", "timeout", "invalid_response", "connection_failed"}:
+        return False
+    return bool(settings.zhihuiya_mcp_url and settings.zhihuiya_mcp_api_key)
 
 
 def _build_mcp_query(task_card: TaskCard) -> str:
@@ -272,6 +346,8 @@ def _build_mcp_query(task_card: TaskCard) -> str:
         return question[4:].strip()
     if task_card.mode == "raw":
         return question
+    if _is_identity_lookup_task(task_card) and task_card.key_terms:
+        return " ".join(task_card.key_terms)
 
     parts = [question]
     if task_card.context:
@@ -281,6 +357,13 @@ def _build_mcp_query(task_card: TaskCard) -> str:
     if task_card.intents:
         parts.append("任务意图：" + " ".join(task_card.intents))
     return "\n".join(part for part in parts if part)
+
+
+def _is_identity_lookup_task(task_card: TaskCard) -> bool:
+    intents = set(task_card.intents)
+    has_identity_intent = bool(intents & {"inventor", "applicant"})
+    has_technical_intent = bool(intents & {"technical_solution", "risk", "novelty_search", "infringement", "novelty"})
+    return has_identity_intent and not has_technical_intent
 
 
 def _patent_to_public_dict(hit: PatentHit) -> dict[str, Any]:
@@ -394,6 +477,110 @@ def _legacy_answer(report: dict[str, Any]) -> str:
 
 def _clamp_limit(limit: int) -> int:
     return max(1, min(int(limit or 10), 50))
+
+
+def _public_config(settings: Settings) -> dict[str, Any]:
+    return {
+        "ok": True,
+        "local_env_exists": (ROOT / ".env.local").exists(),
+        "patent_search": {
+            "base_url": clean_mcp_url_and_key(settings.zhihuiya_mcp_url, "")[0],
+            "key_configured": bool(settings.zhihuiya_mcp_api_key),
+        },
+        "novelty_search": {
+            "base_url": clean_mcp_url_and_key(settings.zhihuiya_novelty_mcp_url, "")[0],
+            "key_configured": bool(settings.zhihuiya_novelty_mcp_api_key or settings.zhihuiya_mcp_api_key),
+            "uses_main_key": not bool(settings.zhihuiya_novelty_mcp_api_key) and bool(settings.zhihuiya_mcp_api_key),
+        },
+        "timeout": settings.zhihuiya_mcp_timeout,
+        "default_limit": settings.zhihuiya_mcp_default_limit,
+    }
+
+
+def _save_local_config(request: LocalConfigRequest, settings: Settings) -> dict[str, bool]:
+    env_path = ROOT / ".env.local"
+    current = _read_env_file(env_path)
+
+    patent_url, patent_key = clean_mcp_url_and_key(
+        request.zhihuiya_mcp_url or current.get("ZHIHUIYA_MCP_URL") or settings.zhihuiya_mcp_url,
+        request.zhihuiya_mcp_api_key or current.get("ZHIHUIYA_MCP_API_KEY") or settings.zhihuiya_mcp_api_key,
+    )
+    novelty_url, novelty_key = clean_mcp_url_and_key(
+        request.zhihuiya_novelty_mcp_url
+        or current.get("ZHIHUIYA_NOVELTY_MCP_URL")
+        or settings.zhihuiya_novelty_mcp_url,
+        request.zhihuiya_novelty_mcp_api_key
+        or current.get("ZHIHUIYA_NOVELTY_MCP_API_KEY")
+        or settings.zhihuiya_novelty_mcp_api_key,
+    )
+
+    values = {
+        "ZHIHUIYA_MCP_URL": patent_url,
+        "ZHIHUIYA_MCP_API_KEY": patent_key,
+        "ZHIHUIYA_MCP_TIMEOUT": str(current.get("ZHIHUIYA_MCP_TIMEOUT") or settings.zhihuiya_mcp_timeout),
+        "ZHIHUIYA_MCP_DEFAULT_LIMIT": str(
+            current.get("ZHIHUIYA_MCP_DEFAULT_LIMIT") or settings.zhihuiya_mcp_default_limit
+        ),
+        "ZHIHUIYA_NOVELTY_MCP_URL": novelty_url,
+        "ZHIHUIYA_NOVELTY_MCP_API_KEY": novelty_key,
+    }
+    _write_env_file(env_path, values)
+    return {
+        "patent_search": bool(patent_url and patent_key),
+        "novelty_search": bool(novelty_url and (novelty_key or patent_key)),
+    }
+
+
+def _read_env_file(path: Path) -> dict[str, str]:
+    if not path.exists():
+        return {}
+    values: dict[str, str] = {}
+    for raw_line in path.read_text(encoding="utf-8").splitlines():
+        line = raw_line.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        key, value = line.split("=", 1)
+        values[key.strip()] = value.strip()
+    return values
+
+
+def _write_env_file(path: Path, values: dict[str, str]) -> None:
+    lines = [
+        "# Local-only Zhihuiya MCP configuration. This file is ignored by git.",
+        f"ZHIHUIYA_MCP_URL={values['ZHIHUIYA_MCP_URL']}",
+        f"ZHIHUIYA_MCP_API_KEY={values['ZHIHUIYA_MCP_API_KEY']}",
+        f"ZHIHUIYA_MCP_TIMEOUT={values['ZHIHUIYA_MCP_TIMEOUT']}",
+        f"ZHIHUIYA_MCP_DEFAULT_LIMIT={values['ZHIHUIYA_MCP_DEFAULT_LIMIT']}",
+        f"ZHIHUIYA_NOVELTY_MCP_URL={values['ZHIHUIYA_NOVELTY_MCP_URL']}",
+        f"ZHIHUIYA_NOVELTY_MCP_API_KEY={values['ZHIHUIYA_NOVELTY_MCP_API_KEY']}",
+        "",
+    ]
+    path.write_text("\n".join(lines), encoding="utf-8")
+
+
+def _self_test_case(case: str, limit: int) -> dict[str, Any]:
+    normalized = (case or "").lower()
+    cases = {
+        "tsinghua": {
+            "question": "查询清华大学蔡临宁作为前三发明人的专利",
+            "mode": "balanced",
+            "limit": limit,
+            "context": "返回公开号、申请人、发明人和公开日即可。",
+        },
+        "raw": {
+            "question": '((hydrogen OR H2 OR 储氢) AND (cylinder OR vessel OR tank OR 气瓶 OR 压力容器) AND ("carbon fiber" OR composite OR 缠绕 OR 复合材料) AND (relief valve OR safety valve OR 泄压阀 OR 安全阀))',
+            "mode": "raw",
+            "limit": limit,
+            "context": "保留原始布尔检索式。",
+        },
+        "hydrogen": {
+            "question": "氢气瓶复合材料缠绕和泄压阀技术方案",
+            "mode": "infringement",
+            "limit": limit,
+            "context": "关注压力容器、复合材料、缠绕层和安全阀。",
+        },
+    }
+    return cases.get(normalized, cases["tsinghua"])
 
 
 def main() -> None:

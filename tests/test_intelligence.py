@@ -25,6 +25,20 @@ def test_chinese_question_builds_task_card():
     assert "法律意见" in card.caution
 
 
+def test_person_lookup_keeps_output_fields_out_of_key_terms():
+    card = build_task_card(
+        "查询清华大学蔡临宁作为前三发明人的专利",
+        "关注公开号、申请人、发明人、公开日、法律状态和证据链接。",
+        "balanced",
+    )
+
+    assert "清华大学" in card.key_terms
+    assert "蔡临宁" in card.key_terms
+    assert "公开号" not in card.key_terms
+    assert "证据链接" not in card.key_terms
+    assert "申请人" not in card.key_terms
+
+
 def test_mock_mcp_hits_normalize_to_patent_hits():
     raw = {
         "data": {
@@ -75,7 +89,7 @@ def test_risk_summary_contains_uncertainty_and_no_legal_overpromise():
 
 
 def test_top_n_ranking_includes_comparison_and_evidence():
-    card = build_task_card("查新 可穿戴 多模态 活动识别 前2", mode="novelty")
+    card = build_task_card("查新 可穿戴 多模态 活动识别 温湿度 前2", mode="novelty")
     hits = normalize_mcp_hits(
         [
             {

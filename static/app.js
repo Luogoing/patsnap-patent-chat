@@ -9,6 +9,14 @@ const report = document.querySelector("#report");
 const requestStatus = document.querySelector("#request-status");
 const modeDescription = document.querySelector("#mode-description");
 const modeHelp = document.querySelector("#mode-help");
+const configSummary = document.querySelector("#config-summary");
+const configMainUrl = document.querySelector("#config-main-url");
+const configMainKey = document.querySelector("#config-main-key");
+const configNoveltyUrl = document.querySelector("#config-novelty-url");
+const configNoveltyKey = document.querySelector("#config-novelty-key");
+const saveConfigButton = document.querySelector("#save-config-button");
+const selfTestButton = document.querySelector("#self-test-button");
+const configStatus = document.querySelector("#config-status");
 
 const MODE_META = {
   balanced: {
@@ -114,6 +122,11 @@ function setStatus(message, tone = "neutral") {
   requestStatus.dataset.tone = tone;
 }
 
+function setConfigStatus(message, tone = "neutral") {
+  configStatus.textContent = message || "";
+  configStatus.dataset.tone = tone;
+}
+
 function renderKeyValueList(items) {
   const list = el("dl", "kv-list");
   items
@@ -211,12 +224,29 @@ function renderPatents(data) {
       ]),
     );
 
+    const evidenceText = evidenceSummary(evidence);
     if (abstract) item.appendChild(el("p", "patent-abstract", abstract));
-    if (evidence) item.appendChild(el("p", "patent-evidence", `证据：${textValue(evidence)}`));
+    if (evidenceText) item.appendChild(el("p", "patent-evidence", `证据：${evidenceText}`));
     appendPatentLink(item, patent);
     list.appendChild(item);
   });
   return list;
+}
+
+function evidenceSummary(value) {
+  const items = asArray(value).filter(Boolean);
+  if (!items.length) return "";
+  return items
+    .slice(0, 3)
+    .map((item) => {
+      if (typeof item === "string") return item;
+      const reason = firstValue(item, ["reason"], "");
+      const field = firstValue(item, ["field", "source"], "");
+      const text = firstValue(item, ["text", "snippet", "summary"], "");
+      return [reason, field, text].filter(Boolean).join(" | ");
+    })
+    .filter(Boolean)
+    .join("；");
 }
 
 function renderRiskSummary(data) {
@@ -268,10 +298,47 @@ function countEvidence(data) {
   return asArray(firstValue(data, ["evidence", "citations", "sources"], [])).length;
 }
 
+function getRanking(data) {
+  return asArray(firstValue(data, ["ranking"], [])).filter(Boolean);
+}
+
+function rankingSummary(data) {
+  const ranking = getRanking(data);
+  if (!ranking.length) return "";
+  const head = ranking
+    .slice(0, 3)
+    .map((item) => {
+      const rank = firstValue(item, ["rank"], "");
+      const number = firstValue(item, ["number", "patent_number"], "");
+      const title = firstValue(item, ["title"], "");
+      const score = formatScore(firstValue(item, ["score"], ""));
+      return [`#${rank || ""}`, number, title, score ? `相关度 ${score}` : ""].filter(Boolean).join(" · ");
+    })
+    .join("；");
+  return `已生成 ${ranking.length} 条排序记录${head ? `：${head}` : ""}`;
+}
+
+function renderRanking(data) {
+  const ranking = getRanking(data);
+  if (!ranking.length) return el("p", "muted", "暂无排序依据");
+  const list = el("ol", "ranking-list");
+  ranking.slice(0, 10).forEach((item) => {
+    const listItem = el("li", "ranking-item");
+    const title = firstValue(item, ["title"], "未命名专利");
+    const number = firstValue(item, ["number", "patent_number"], "");
+    const score = formatScore(firstValue(item, ["score"], ""));
+    listItem.appendChild(el("strong", "", [number, title].filter(Boolean).join(" | ")));
+    if (score) listItem.appendChild(el("span", "badge", `相关度 ${score}`));
+    const basis = asArray(firstValue(item, ["basis", "reasons"], []));
+    if (basis.length) listItem.appendChild(renderTextList(basis.slice(0, 3)));
+    list.appendChild(listItem);
+  });
+  return list;
+}
+
 function renderStatusSummary(data, requestPayload) {
   const traceId = firstValue(data, ["trace_id", "traceId", "request_id"], "");
   const status = firstValue(data, ["status"], data.ok === false ? "失败" : "完成");
-  const ranking = firstValue(data, ["ranking"], "");
   const patents = getPatents(data);
   const summary = el("section", "status-summary");
   summary.appendChild(el("h2", "", "结果状态"));
@@ -281,7 +348,8 @@ function renderStatusSummary(data, requestPayload) {
       { label: "模式", value: MODE_META[requestPayload.mode]?.label || requestPayload.mode },
       { label: "专利数", value: patents.length },
       { label: "证据数", value: countEvidence(data) },
-      { label: "排序", value: textValue(ranking) },
+      { label: "排序", value: rankingSummary(data) },
+      { label: "通道", value: firstValue(data, ["channel", "tool"], "") },
       { label: "trace_id", value: traceId },
     ]),
   );
@@ -339,6 +407,7 @@ function renderReport(data, requestPayload) {
   report.appendChild(renderStatusSummary(data, requestPayload));
   report.appendChild(renderTaskCard(data, requestPayload));
   report.appendChild(renderSection("Top 专利", renderPatents(data)));
+  report.appendChild(renderSection("排序依据", renderRanking(data)));
   report.appendChild(renderSection("相似点", renderTextList(firstValue(data, ["similarities", "similar_points"], []))));
   report.appendChild(renderSection("差异点", renderTextList(firstValue(data, ["differences", "different_points"], []))));
   report.appendChild(renderSection("风险摘要", renderRiskSummary(data)));
@@ -368,12 +437,89 @@ function fillExample(name) {
   setStatus("已填入示例，可以直接生成或继续修改。", "success");
 }
 
+function renderConfig(config) {
+  const patent = config.patent_search || {};
+  const novelty = config.novelty_search || {};
+  configMainUrl.value = patent.base_url || "https://connect.zhihuiya.com/2b0355/logic-mcp";
+  configNoveltyUrl.value = novelty.base_url || "https://connect.zhihuiya.com/bec69d/mcp";
+  configMainKey.value = "";
+  configNoveltyKey.value = "";
+  const patentReady = Boolean(patent.key_configured || patent.has_api_key);
+  const noveltyReady = Boolean(novelty.key_configured || novelty.has_api_key);
+  const patentText = patentReady ? "专利搜索已配置" : "专利搜索未配置 key";
+  const noveltyText = noveltyReady ? "查新通道已配置" : "查新通道未配置 key";
+  configSummary.textContent = `${patentText}；${noveltyText}。已保存的 key 不会在页面回显。`;
+}
+
+async function loadConfig() {
+  try {
+    const response = await fetch("/api/config");
+    const config = await response.json();
+    renderConfig(config);
+    setConfigStatus("本地配置已读取。", "success");
+  } catch (error) {
+    setConfigStatus("读取配置失败，服务可能未启动。", "error");
+  }
+}
+
+async function saveConfig() {
+  saveConfigButton.disabled = true;
+  setConfigStatus("正在保存到本地 .env.local 并检测连接...", "loading");
+  try {
+    const payload = {
+      zhihuiya_mcp_url: configMainUrl.value.trim(),
+      zhihuiya_mcp_api_key: configMainKey.value.trim(),
+      zhihuiya_novelty_mcp_url: configNoveltyUrl.value.trim(),
+      zhihuiya_novelty_mcp_api_key: configNoveltyKey.value.trim(),
+    };
+    const response = await fetch("/api/config", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    });
+    const data = await response.json();
+    if (!response.ok || data.ok === false) throw new Error(firstValue(data, ["error", "detail"], "保存失败"));
+    renderConfig(data.config || {});
+    const channels = data.health?.channels || {};
+    const connected = Object.values(channels).filter((item) => item.connectable).length;
+    setConfigStatus(`已保存，${connected} 个 MCP 通道可连接。`, connected ? "success" : "error");
+  } catch (error) {
+    setConfigStatus(error.message || "保存失败。", "error");
+  } finally {
+    saveConfigButton.disabled = false;
+  }
+}
+
+async function runSelfTest() {
+  selfTestButton.disabled = true;
+  setConfigStatus("正在跑内置自检：健康检查、人物检索、专家检索式...", "loading");
+  try {
+    const response = await fetch("/api/self-test", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ cases: ["tsinghua", "raw", "hydrogen"], limit: 3 }),
+    });
+    const data = await response.json();
+    if (!response.ok) throw new Error(`自检接口失败：${response.status}`);
+    const passed = asArray(data.results).filter((item) => item.ok).length;
+    const total = asArray(data.results).length;
+    setConfigStatus(`自检完成：${passed}/${total} 通过。${data.trace_id ? `trace_id ${data.trace_id}` : ""}`, data.ok ? "success" : "error");
+  } catch (error) {
+    setConfigStatus(error.message || "自检失败。", "error");
+  } finally {
+    selfTestButton.disabled = false;
+  }
+}
+
 document.querySelectorAll(".example-button").forEach((button) => {
   button.addEventListener("click", () => fillExample(button.dataset.example));
 });
 
+saveConfigButton.addEventListener("click", saveConfig);
+selfTestButton.addEventListener("click", runSelfTest);
 modeInput.addEventListener("change", updateModeHelp);
 updateModeHelp();
+loadConfig();
 
 form.addEventListener("submit", async (event) => {
   event.preventDefault();

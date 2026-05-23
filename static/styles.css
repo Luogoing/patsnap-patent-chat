@@ -128,6 +128,12 @@ h3 {
   gap: 10px;
 }
 
+.config-block input {
+  min-height: 34px;
+  padding: 7px 9px;
+  font-size: 12px;
+}
+
 .guide-block ol {
   display: grid;
   gap: 7px;
@@ -264,6 +270,61 @@ input:focus {
   background: var(--danger-bg);
 }
 
+.mini-actions {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+}
+
+.mini-actions button {
+  min-height: 34px;
+  padding: 7px 9px;
+  font-size: 12px;
+}
+
+.secondary-button {
+  border: 1px solid var(--line);
+  background: #fff;
+  color: var(--accent-strong);
+}
+
+.secondary-button:hover {
+  border-color: #b7d8d2;
+  background: var(--accent-soft);
+}
+
+.mini-status {
+  min-height: 30px;
+  border: 1px solid var(--soft-line);
+  border-radius: 6px;
+  padding: 7px 9px;
+  color: var(--muted);
+  background: #fff;
+  font-size: 12px;
+}
+
+.mini-status:empty {
+  display: none;
+}
+
+.mini-status[data-tone="loading"] {
+  border-color: #b7d8d2;
+  color: var(--accent-strong);
+  background: var(--accent-soft);
+}
+
+.mini-status[data-tone="success"] {
+  border-color: #abefc6;
+  color: var(--success);
+  background: var(--success-bg);
+}
+
+.mini-status[data-tone="error"] {
+  border-color: #fecdca;
+  color: var(--danger);
+  background: var(--danger-bg);
+}
+
 .actions {
   display: flex;
   justify-content: flex-end;
@@ -382,6 +443,24 @@ button:disabled {
   margin: 0;
   padding: 0;
   list-style: none;
+}
+
+.ranking-list {
+  display: grid;
+  gap: 10px;
+  margin: 0;
+  padding-left: 20px;
+}
+
+.ranking-item {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 7px 10px;
+  align-items: start;
+}
+
+.ranking-item .text-list {
+  grid-column: 1 / -1;
 }
 
 .patent-card {

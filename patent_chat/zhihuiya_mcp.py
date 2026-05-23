@@ -22,6 +22,7 @@ TIMEOUT = "timeout"
 INVALID_RESPONSE = "invalid_response"
 SDK_UNAVAILABLE = "sdk_unavailable"
 CONNECTION_FAILED = "connection_failed"
+RETRIABLE_ERROR_CODES = {TIMEOUT, CONNECTION_FAILED}
 
 SECRET_QUERY_KEYS = {
     "apikey",
@@ -190,6 +191,8 @@ def _build_patsnap_search_arguments(query: str, limit: int, properties: dict[str
 
     filters = _extract_filters(query)
     keywords = _extract_search_keywords(query)
+    if filters:
+        keywords = _remove_filter_only_noise(keywords, filters)
     use_filter = bool(filters)
     use_keyword = bool(keywords)
     use_semantic = not use_filter and not use_keyword
@@ -244,6 +247,28 @@ def _extract_search_keywords(query: str) -> list[str]:
         "方案",
         "分析",
         "作为",
+        "前三",
+        "前3",
+        "前二",
+        "前2",
+        "第一",
+        "第二",
+        "第三",
+        "关注",
+        "重点关注",
+        "返回",
+        "输出",
+        "即可",
+        "公开号",
+        "公开日",
+        "申请日",
+        "授权日",
+        "法律状态",
+        "证据",
+        "证据链接",
+        "链接",
+        "字段",
+        "列表",
         "发明人",
         "申请人",
         "technical_solution",
@@ -270,6 +295,36 @@ def _extract_search_keywords(query: str) -> list[str]:
         if re.fullmatch(r"[\u4e00-\u9fff]{2,}", token) or re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_-]{1,}", token):
             keywords.append(token)
     return list(dict.fromkeys(keywords))
+
+
+def _remove_filter_only_noise(keywords: list[str], filters: dict[str, Any]) -> list[str]:
+    display_terms = {
+        "关注公开号",
+        "返回公开号",
+        "公开号",
+        "公开日",
+        "申请日",
+        "法律状态",
+        "证据链接",
+        "证据",
+        "链接",
+        "发明人",
+        "申请人",
+    }
+    filter_values = {
+        str(value)
+        for values in filters.values()
+        for value in (values if isinstance(values, list) else [values])
+        if value
+    }
+    kept = []
+    for keyword in keywords:
+        if keyword in display_terms or keyword in filter_values:
+            continue
+        if any(term in keyword for term in display_terms):
+            continue
+        kept.append(keyword)
+    return kept
 
 
 def _json_from_text(text: str) -> Any:
@@ -503,6 +558,18 @@ class ZhihuiyaMCPClient:
         if missing:
             return missing
         safe_limit = _clamp_limit(limit, self.default_limit)
+        last_result: dict[str, Any] | None = None
+        for attempt in range(3):
+            result = await self._search_with_error_mapping(query, safe_limit)
+            last_result = result
+            code = ((result.get("error") or {}).get("code") if isinstance(result, dict) else "")
+            if result.get("ok") or code not in RETRIABLE_ERROR_CODES:
+                return result
+            if attempt < 2:
+                await asyncio.sleep(0.5 * (attempt + 1))
+        return last_result or _result_error(CONNECTION_FAILED, _message_for_code(CONNECTION_FAILED))
+
+    async def _search_with_error_mapping(self, query: str, safe_limit: int) -> dict[str, Any]:
         try:
             return await asyncio.wait_for(self._search_once(query, safe_limit), timeout=self.timeout + 1)
         except (asyncio.TimeoutError, TimeoutError) as exc:
