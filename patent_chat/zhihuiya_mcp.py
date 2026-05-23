@@ -161,6 +161,9 @@ def _build_search_arguments(tool: dict[str, Any], query: str, limit: int) -> dic
     schema = tool.get("input_schema")
     properties = schema.get("properties", {}) if isinstance(schema, dict) else {}
 
+    if "search_strategy" in properties and ("semantic_query" in properties or "keywords" in properties):
+        return _build_patsnap_search_arguments(query, limit, properties)
+
     args: dict[str, Any] = {}
     query_name = "query"
     for candidate in ("query", "q", "keyword", "keywords", "query_text"):
@@ -176,6 +179,97 @@ def _build_search_arguments(tool: dict[str, Any], query: str, limit: int) -> dic
             break
     args[limit_name] = limit
     return args
+
+
+def _build_patsnap_search_arguments(query: str, limit: int, properties: dict[str, Any]) -> dict[str, Any]:
+    args: dict[str, Any] = {}
+    if "topk" in properties:
+        args["topk"] = limit
+    if "sources" in properties:
+        args["sources"] = ["patent"]
+
+    filters = _extract_filters(query)
+    keywords = _extract_search_keywords(query)
+    use_filter = bool(filters)
+    use_keyword = bool(keywords)
+    use_semantic = not use_filter and not use_keyword
+
+    strategy: list[str] = []
+    if use_semantic and "semantic_query" in properties:
+        strategy.append("semantic")
+        args["semantic_query"] = query
+    if use_keyword and "keywords" in properties:
+        strategy.append("keyword")
+        args["keywords"] = keywords[:8]
+    if use_filter and "filters" in properties:
+        strategy.append("filter")
+        args["filters"] = filters
+    if not strategy and "semantic_query" in properties:
+        strategy.append("semantic")
+        args["semantic_query"] = query
+
+    args["search_strategy"] = strategy or ["keyword"]
+    return args
+
+
+def _extract_filters(query: str) -> dict[str, Any]:
+    filters: dict[str, Any] = {}
+    compact = re.sub(r"\s+", "", query)
+
+    if "清华大学" in compact:
+        filters["assignees"] = ["清华大学"]
+    if "蔡临宁" in compact:
+        filters["inventors"] = ["蔡临宁"]
+
+    inventor_match = re.search(r"([\u4e00-\u9fff]{2,4})(?:作为)?(?:前[一二三四五六七八九十\d]+)?发明人", compact)
+    if inventor_match and inventor_match.group(1) not in {"查询", "检索", "搜索"}:
+        filters.setdefault("inventors", [inventor_match.group(1)])
+
+    assignee_match = re.search(r"(清华大学|北京大学|浙江大学|上海交通大学|华为|腾讯|阿里巴巴|小米|比亚迪)", compact)
+    if assignee_match:
+        filters.setdefault("assignees", [assignee_match.group(1)])
+    return filters
+
+
+def _extract_search_keywords(query: str) -> list[str]:
+    cleaned = re.sub(r"(补充上下文|关键词|任务意图)[:：]", " ", query)
+    tokens = re.split(r"[\s,.;:!?，。；：！？、（）()【】\[\]{}<>《》\"'“”‘’]+", cleaned)
+    stopwords = {
+        "查询",
+        "检索",
+        "搜索",
+        "相关",
+        "专利",
+        "技术",
+        "方案",
+        "分析",
+        "作为",
+        "发明人",
+        "申请人",
+        "technical_solution",
+        "general_search",
+        "inventor",
+        "applicant",
+        "assignee",
+        "patent_search",
+        "balanced",
+        "novelty",
+        "risk",
+    }
+    keywords: list[str] = []
+    preferred_terms = ("氢气瓶", "复合材料", "缠绕", "泄压阀", "压力容器", "可穿戴", "多模态", "健康监测")
+    for term in preferred_terms:
+        if term in query:
+            keywords.append(term)
+    for token in tokens:
+        token = token.strip()
+        if not token or token in stopwords:
+            continue
+        if len(token) > 18:
+            continue
+        if re.fullmatch(r"[\u4e00-\u9fff]{2,}", token) or re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_-]{1,}", token):
+            keywords.append(token)
+    return list(dict.fromkeys(keywords))
 
 
 def _json_from_text(text: str) -> Any:

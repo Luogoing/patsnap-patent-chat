@@ -2,7 +2,7 @@ $ErrorActionPreference = "Stop"
 
 $root = Split-Path -Parent $PSScriptRoot
 $target = Join-Path $root ".env.local"
-$secure = Read-Host "Paste Zhihuiya MCP API key for local .env.local" -AsSecureString
+$secure = Read-Host "Paste Zhihuiya MCP API key or full MCP link for local .env.local" -AsSecureString
 $bstr = [Runtime.InteropServices.Marshal]::SecureStringToBSTR($secure)
 try {
   $plain = [Runtime.InteropServices.Marshal]::PtrToStringAuto($bstr)
@@ -13,6 +13,14 @@ finally {
 
 if ([string]::IsNullOrWhiteSpace($plain)) {
   throw "API key is empty."
+}
+
+if ($plain -match '[?&]apikey=([^&]+)') {
+  $plain = [Uri]::UnescapeDataString($Matches[1])
+}
+
+if ($plain -notmatch '^sk') {
+  Write-Warning "Input does not look like a Zhihuiya API key after parsing. It will still be saved, but authentication may fail."
 }
 
 $lines = @()

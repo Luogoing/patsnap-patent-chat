@@ -5,6 +5,7 @@ from patent_chat.config import Settings
 from patent_chat.zhihuiya_mcp import (
     MISSING_API_KEY,
     ZhihuiyaMCPClient,
+    _build_search_arguments,
     clean_mcp_url_and_key,
     normalize_search_result,
     platform_error_from_payload,
@@ -86,6 +87,31 @@ def test_missing_key_error_is_structured():
     assert result["ok"] is False
     assert result["error"]["code"] == MISSING_API_KEY
     assert "ZHIHUIYA_MCP_API_KEY" in result["error"]["message"]
+
+
+def test_patsnap_search_schema_uses_topk_filters_and_strategy():
+    tool = {
+        "name": "patsnap_search",
+        "input_schema": {
+            "properties": {
+                "topk": {},
+                "filters": {},
+                "sources": {},
+                "keywords": {},
+                "semantic_query": {},
+                "search_strategy": {},
+            }
+        },
+    }
+
+    args = _build_search_arguments(tool, "查询清华大学蔡临宁作为前三发明人的专利", 5)
+
+    assert args["topk"] == 5
+    assert args["sources"] == ["patent"]
+    assert args["search_strategy"] == ["filter"]
+    assert "keywords" not in args
+    assert args["filters"]["assignees"] == ["清华大学"]
+    assert args["filters"]["inventors"] == ["蔡临宁"]
 
 
 def test_normalize_search_result_parses_mcp_text_json():

@@ -29,7 +29,7 @@ python -m venv .venv
 .\scripts\set_zhihuiya_mcp_key.ps1
 ```
 
-这会写入本地 `.env.local`：
+提示输入时可以粘贴纯 API key，也可以粘贴 marketplace 生成的完整 MCP 链接；脚本会自动提取 `apikey`。这会写入本地 `.env.local`：
 
 ```text
 ZHIHUIYA_MCP_URL=https://connect.zhihuiya.com/2b0355/logic-mcp
