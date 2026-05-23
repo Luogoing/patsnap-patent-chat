@@ -1,10 +1,10 @@
-# Patsnap 专利检索对话接口说明
+# 智慧芽 MCP 专利情报接口说明
 
-日期：2026-05-23
+日期：2026-05-24
 
 ## 当前完成状态
 
-已在本项目中建立一个基础本地 Web 对话接口：
+已在本项目中建立一期本地 Web 专利情报接口：
 
 ```text
 http://127.0.0.1:8787
@@ -13,13 +13,12 @@ http://127.0.0.1:8787
 核心文件：
 
 ```text
-patent_chat/app.py              FastAPI 后端
-patent_chat/patsnap_client.py   智慧芽 API 客户端
-patent_chat/query_builder.py    自然语言到 Patsnap 检索式的基础转换
-patent_chat/normalizer.py       API 返回结果标准化
+patent_chat/app.py              FastAPI 后端和 API 路由
+patent_chat/zhihuiya_mcp.py     智慧芽 MCP Streamable HTTP 客户端
+patent_chat/intelligence.py     任务卡、命中归一化、排序和风险摘要规则链
 static/                         本地前端页面
 scripts/run.ps1                 本地启动脚本
-scripts/set_patsnap_key.ps1     本地密钥写入脚本
+scripts/set_zhihuiya_mcp_key.ps1 本地密钥写入脚本
 ```
 
 ## 密钥处理
@@ -29,104 +28,99 @@ scripts/set_patsnap_key.ps1     本地密钥写入脚本
 本地运行前执行：
 
 ```powershell
-.\scripts\set_patsnap_key.ps1
+.\scripts\set_zhihuiya_mcp_key.ps1
 ```
 
-脚本会提示粘贴 API key，并写入：
+脚本会提示粘贴 API key，并写入被 Git 忽略的 `.env.local`：
 
 ```text
-.env.local
+ZHIHUIYA_MCP_URL=https://connect.zhihuiya.com/2b0355/logic-mcp
+ZHIHUIYA_MCP_API_KEY=your_local_key_here
 ```
 
-`.env.local` 已被 `.gitignore` 忽略，不会上传 GitHub。
+代码会在内存中把 API key 作为 MCP 连接参数使用，但不会把完整带密钥 URL 写入代码、README、Git 或日志。
 
-## 调用的智慧芽接口
+## 后端接口
 
-依据官方文档，默认配置为：
+### `GET /api/health`
+
+返回 MCP 配置和连通性状态，不返回密钥。
+
+主要字段：
+
+- `mcp.configured`
+- `mcp.has_url`
+- `mcp.has_api_key`
+- `mcp.connectable`
+- `mcp.tool_count`
+- `mcp.error`
+
+### `POST /api/intelligence`
+
+请求：
+
+```json
+{
+  "question": "查询清华大学蔡临宁作为前三发明人的专利",
+  "mode": "balanced",
+  "limit": 10,
+  "context": ""
+}
+```
+
+响应：
 
 ```text
-Base URL: https://connect.patsnap.com
-Authorization: Bearer <API Key>
-Count endpoint: /search/patent/query-search-count
-Search endpoint: /search/patent/nested-search-patent
+task_card
+patents / top_patents
+ranking
+risk_summary
+evidence
+next_questions
+report_markdown
+trace_id
 ```
 
-默认请求头：
+### `POST /api/chat`
 
-```text
-Authorization: Bearer <PATSNAP_API_KEY>
-Content-Type: application/json
-Accept: application/json
-```
+兼容旧聊天入口，内部转调 `/api/intelligence`。
 
 ## 支持的输入
 
-普通关键词：
+自然语言：
 
 ```text
-氢气瓶 复合材料 缠绕 泄压阀
+查询清华大学蔡临宁作为前三发明人的专利
 ```
 
-会转换为：
+技术方案：
 
 ```text
-TACD: 氢气瓶 复合材料 缠绕 泄压阀
+氢气瓶复合材料缠绕和泄压阀技术方案
 ```
 
-专利号：
+专家检索式：
 
 ```text
-US8674530 CN111922118A
+raw: TACD: hydrogen storage tank AND TA: composite
 ```
 
-会转换为：
+## 错误映射
 
-```text
-PN:(US8674530 OR CN111922118A)
-```
+MCP 错误会统一映射为：
 
-原始 Patsnap 检索式：
+- 密钥缺失
+- 认证失败
+- 权限不足
+- 工具不存在
+- 请求超时
+- 返回结构异常
+- SDK 缺失或连接失败
 
-```text
-raw: TACD: virtual reality AND AN: Meta
-```
+所有错误响应都会包含 `trace_id`，用于本地排查。
 
-会直接发送：
+## 当前边界
 
-```text
-TACD: virtual reality AND AN: Meta
-```
-
-## 本次验证
-
-已完成：
-
-- Python 语法编译通过。
-- 依赖安装通过。
-- 查询式生成基础检查通过。
-- FastAPI `/health` 检查通过。
-- `.gitignore` 已保护 `.env*`、虚拟环境、日志和误克隆大目录。
-
-未完成：
-
-- 未使用真实 API key 做在线检索，因为真实密钥不应出现在命令日志或 Git 记录中。
-- GitHub 上传还需要本机 GitHub CLI 登录，或提供一个已有 GitHub 仓库远端。
-
-## 后续可增强
-
-1. 根据智慧芽实际返回字段，细化 `patent_chat/normalizer.py`。
-2. 增加申请人、IPC/CPC、日期、国家/地区过滤控件。
-3. 增加导出 Excel/Markdown 报告。
-4. 增加 Hermes skill 或 MCP server，让飞书里的 Hermes 直接调用该检索接口。
-5. 增加查新模板：技术点、关键词、近似专利、风险等级、规避建议。
-
-## 认证错误说明
-
-如果页面提示智慧芽认证失败，而 `/health` 显示 `has_patsnap_api_key=true`，说明本地已经读到 key，但智慧芽服务端拒绝该 key。
-
-已知排查方向：
-
-- 确认该 key 是 Eureka Open Platform 的 REST API Key。
-- 确认账号开通了 Patent Data Search / P001 / P075 等接口权限。
-- 如果复制的是 MCP Key、过期 Key、被禁用 Key 或未授权 Key，需要在智慧芽后台重新生成或联系智慧芽支持开通。
-- 当前项目不会把 key 上传 GitHub，只会读取本地 `.env.local`。
+- 一期报告仅做创新情报和风险初筛，不构成法律意见。
+- 排序链是规则最小版，依赖 MCP 返回字段完整度；缺少权利要求、法律状态、同族信息时会明确标注不确定性。
+- 飞书/Hermes 接入作为下一阶段，当前先保证本地网页和 MCP 后端跑通。

@@ -3,36 +3,72 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>Patsnap Patent Chat</title>
+    <title>Patsnap Patent Intelligence</title>
     <link rel="stylesheet" href="/static/styles.css" />
   </head>
   <body>
     <main class="shell">
-      <section class="workspace">
+      <section class="workspace" aria-label="专利情报工作台">
         <header class="topbar">
           <div>
-            <h1>Patsnap Patent Chat</h1>
-            <p>智慧芽 API 驱动的本地专利检索对话接口</p>
+            <h1>Patsnap Patent Intelligence</h1>
+            <p>面向技术方案的专利检索、相似性分析与风险研判工作台</p>
           </div>
-          <a class="link" href="/health" target="_blank" rel="noreferrer">Health</a>
+          <a class="health-link" href="/api/health" target="_blank" rel="noreferrer">Health</a>
         </header>
 
-        <section id="messages" class="messages" aria-live="polite">
-          <article class="message assistant">
-            <p>输入技术关键词、公司名、专利号，或用 <code>raw:</code> 直接发送 Patsnap 检索式。</p>
-          </article>
-        </section>
+        <section class="layout">
+          <form id="intelligence-form" class="input-panel">
+            <div class="field-group">
+              <label for="question">技术方案输入</label>
+              <textarea
+                id="question"
+                rows="9"
+                placeholder="例如：一种用于无人机高压储氢瓶的复合材料缠绕结构，包含金属内胆、碳纤维增强层、端部过渡区和泄压安全阀..."
+                required
+              ></textarea>
+            </div>
 
-        <form id="chat-form" class="composer">
-          <textarea id="message" rows="3" placeholder="例如：检索氢气瓶复合材料缠绕和泄压阀相关专利"></textarea>
-          <div class="composer-actions">
-            <label>
-              返回条数
-              <input id="limit" type="number" min="1" max="50" value="10" />
-            </label>
-            <button type="submit">检索</button>
-          </div>
-        </form>
+            <div class="control-grid">
+              <div class="field-group">
+                <label for="mode">检索模式</label>
+                <select id="mode">
+                  <option value="balanced" selected>综合检索</option>
+                  <option value="novelty">新颖性初筛</option>
+                  <option value="infringement">侵权风险</option>
+                  <option value="landscape">技术布局</option>
+                  <option value="raw">专家检索式</option>
+                </select>
+              </div>
+
+              <div class="field-group">
+                <label for="limit">返回条数</label>
+                <input id="limit" type="number" min="1" max="50" value="10" />
+              </div>
+            </div>
+
+            <div class="field-group">
+              <label for="context">补充上下文</label>
+              <textarea
+                id="context"
+                rows="4"
+                placeholder="可填写申请人、产品边界、重点国家/地区、已知竞品、需要避开的关键词等。"
+              ></textarea>
+            </div>
+
+            <div class="actions">
+              <button id="submit-button" type="submit">生成结果报告</button>
+            </div>
+          </form>
+
+          <section class="report-panel" aria-live="polite">
+            <div id="empty-state" class="empty-state">
+              <h2>结果报告</h2>
+              <p>提交技术方案后，这里会显示任务卡、Top 专利、相似点/差异点、风险摘要、证据、下一步追问和 trace_id。</p>
+            </div>
+            <div id="report" class="report hidden"></div>
+          </section>
+        </section>
       </section>
     </main>
     <script src="/static/app.js"></script>

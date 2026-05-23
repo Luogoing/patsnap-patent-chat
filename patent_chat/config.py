@@ -33,6 +33,13 @@ class Settings(BaseSettings):
         alias="PATSNAP_COUNT_PATH",
     )
     patsnap_default_limit: int = Field(default=10, alias="PATSNAP_DEFAULT_LIMIT")
+    zhihuiya_mcp_url: str = Field(
+        default="https://connect.zhihuiya.com/2b0355/logic-mcp",
+        alias="ZHIHUIYA_MCP_URL",
+    )
+    zhihuiya_mcp_api_key: str = Field(default="", alias="ZHIHUIYA_MCP_API_KEY")
+    zhihuiya_mcp_timeout: float = Field(default=30.0, alias="ZHIHUIYA_MCP_TIMEOUT")
+    zhihuiya_mcp_default_limit: int = Field(default=10, alias="ZHIHUIYA_MCP_DEFAULT_LIMIT")
 
 
 def get_settings() -> Settings:

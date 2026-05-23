@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+from dataclasses import fields, is_dataclass
 from pathlib import Path
 from typing import Any
+from uuid import uuid4
 
 from fastapi import FastAPI
 from fastapi.responses import FileResponse
@@ -9,9 +11,18 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
 from .config import ROOT, get_settings
-from .normalizer import extract_total, google_patents_url, normalize_patents
-from .patsnap_client import PatsnapAPIError, PatsnapClient, PatsnapConfigError
-from .query_builder import build_query
+from .intelligence import (
+    PatentHit,
+    RiskSummary,
+    TaskCard,
+    build_next_questions,
+    build_risk_summary,
+    build_task_card,
+    normalize_mcp_hits,
+    rank_patents,
+)
+from .normalizer import google_patents_url
+from .zhihuiya_mcp import ZhihuiyaMCPClient, redact_secret
 
 
 STATIC_DIR = ROOT / "static"
@@ -19,7 +30,7 @@ STATIC_DIR = ROOT / "static"
 
 class ChatRequest(BaseModel):
     message: str = Field(min_length=1)
-    limit: int = 10
+    limit: int = Field(default=10, ge=1, le=50)
     offset: int = 0
 
 
@@ -35,7 +46,14 @@ class ChatResponse(BaseModel):
     error: str | None = None
 
 
-app = FastAPI(title="Patsnap Patent Chat", version="0.1.0")
+class IntelligenceRequest(BaseModel):
+    question: str = Field(min_length=1)
+    mode: str = "balanced"
+    limit: int = Field(default=10, ge=1, le=50)
+    context: str = ""
+
+
+app = FastAPI(title="Zhihuiya MCP Patent Intelligence", version="1.0.0")
 app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
 
 
@@ -46,61 +64,283 @@ async def index() -> FileResponse:
 
 @app.get("/health")
 async def health() -> dict[str, Any]:
+    return await api_health()
+
+
+@app.get("/api/health")
+async def api_health() -> dict[str, Any]:
     settings = get_settings()
+    client = ZhihuiyaMCPClient(settings)
+    remote = await client.health()
+    data = remote.get("data") or {}
+    error = remote.get("error")
+
     return {
-        "ok": True,
-        "has_patsnap_api_key": bool(settings.patsnap_api_key),
-        "base_url": settings.patsnap_base_url,
-        "search_path": settings.patsnap_search_path,
+        "ok": bool(remote.get("ok")),
+        "service": "zhihuiya-mcp-patent-intelligence",
+        "mcp": {
+            "configured": bool(client.base_url and client.api_key),
+            "has_url": bool(client.base_url),
+            "has_api_key": bool(client.api_key),
+            "base_url": client.base_url,
+            "connectable": bool(remote.get("ok")),
+            "tool_count": data.get("tool_count", 0),
+            "error": error,
+        },
+        "legacy_rest_configured": bool(settings.patsnap_api_key),
     }
+
+
+@app.post("/api/intelligence")
+async def intelligence(request: IntelligenceRequest) -> dict[str, Any]:
+    return await run_intelligence(
+        question=request.question,
+        mode=request.mode,
+        limit=request.limit,
+        context=request.context,
+    )
 
 
 @app.post("/api/chat", response_model=ChatResponse)
 async def chat(request: ChatRequest) -> ChatResponse:
+    report = await run_intelligence(
+        question=request.message,
+        mode="balanced",
+        limit=request.limit,
+        context="",
+    )
+    query_text = str(report.get("query") or request.message)
+    error = report.get("error") if not report.get("ok") else None
+    return ChatResponse(
+        ok=bool(report.get("ok")),
+        answer=_legacy_answer(report),
+        query_text=query_text,
+        query_mode="zhihuiya_mcp",
+        total=len(report.get("patents") or []),
+        google_patents_url=google_patents_url(query_text),
+        patents=report.get("patents") or [],
+        raw={"trace_id": report.get("trace_id"), "tool": report.get("tool")},
+        error=str(error) if error else None,
+    )
+
+
+async def run_intelligence(question: str, mode: str = "balanced", limit: int = 10, context: str = "") -> dict[str, Any]:
+    trace_id = uuid4().hex
+    safe_limit = _clamp_limit(limit)
+    task_card = build_task_card(question=question, context=context, mode=mode)
+    query = _build_mcp_query(task_card)
+
     settings = get_settings()
-    built = build_query(request.message)
-    client = PatsnapClient(settings)
-    try:
-        count_response = await client.count(built.query_text)
-        search_response = await client.search(
-            built.query_text,
-            limit=request.limit or settings.patsnap_default_limit,
-            offset=request.offset,
-        )
-        total = extract_total(count_response, search_response)
-        patents = normalize_patents(search_response, built.query_text, request.limit)
-        answer = make_answer(built.query_text, built.note, total, patents)
-        return ChatResponse(
-            ok=True,
-            answer=answer,
-            query_text=built.query_text,
-            query_mode=built.mode,
-            total=total,
-            google_patents_url=google_patents_url(built.query_text),
-            patents=patents,
-            raw={"count": count_response, "search": search_response},
-        )
-    except (PatsnapConfigError, PatsnapAPIError) as exc:
-        return ChatResponse(
+    client = ZhihuiyaMCPClient(settings)
+    mcp_response = await client.search(query=query, limit=safe_limit)
+
+    if not mcp_response.get("ok"):
+        risk_summary = build_risk_summary(task_card, [])
+        return _make_response(
             ok=False,
-            answer=f"检索失败：{exc}",
-            query_text=built.query_text,
-            query_mode=built.mode,
-            google_patents_url=google_patents_url(built.query_text),
-            error=str(exc),
+            trace_id=trace_id,
+            task_card=task_card,
+            query=query,
+            patents=[],
+            risk_summary=risk_summary,
+            error=mcp_response.get("error") or {"message": "智慧芽 MCP 调用失败。"},
         )
 
+    data = mcp_response.get("data") or {}
+    raw_payload = data.get("raw") or {"items": data.get("items") or []}
+    hits = normalize_mcp_hits(raw_payload)
+    if not hits and data.get("items"):
+        hits = normalize_mcp_hits({"items": data["items"]})
 
-def make_answer(query_text: str, note: str, total: int | None, patents: list[dict[str, Any]]) -> str:
-    total_text = f"命中约 {total} 件" if total is not None else "已完成检索，但未解析到总数"
+    ranked = rank_patents(task_card, hits, limit=safe_limit)
+    risk_summary = build_risk_summary(task_card, ranked)
+    return _make_response(
+        ok=True,
+        trace_id=trace_id,
+        task_card=task_card,
+        query=query,
+        patents=ranked,
+        risk_summary=risk_summary,
+        tool=data.get("tool", ""),
+        mcp_count=len(hits),
+    )
+
+
+def _make_response(
+    *,
+    ok: bool,
+    trace_id: str,
+    task_card: TaskCard,
+    query: str,
+    patents: list[PatentHit],
+    risk_summary: RiskSummary,
+    tool: str = "",
+    mcp_count: int = 0,
+    error: Any = None,
+) -> dict[str, Any]:
+    public_patents = [_patent_to_public_dict(hit) for hit in patents]
+    evidence = [item for hit in patents for item in hit.evidence]
+    similarities = _flatten_points(patents, "similarity_points")
+    differences = _flatten_points(patents, "difference_points")
+    next_questions = build_next_questions(task_card, patents)
+    error_payload = redact_secret(error) if error else None
+
+    response = {
+        "ok": ok,
+        "trace_id": trace_id,
+        "task_card": _to_jsonable(task_card),
+        "query": query,
+        "search_query": query,
+        "mode": task_card.mode,
+        "tool": tool,
+        "mcp_count": mcp_count,
+        "patents": public_patents,
+        "top_patents": public_patents,
+        "ranking": _build_ranking(public_patents),
+        "risk_summary": _to_jsonable(risk_summary),
+        "evidence": [_to_jsonable(item) for item in evidence],
+        "similarities": similarities,
+        "differences": differences,
+        "next_questions": next_questions,
+        "report_markdown": _build_markdown_report(task_card, public_patents, risk_summary, next_questions),
+    }
+    if error_payload:
+        message = _error_message(error_payload)
+        response["error"] = message
+        response["error_detail"] = error_payload
+        if isinstance(error_payload, dict):
+            response["error_code"] = error_payload.get("code", "")
+    return response
+
+
+def _build_mcp_query(task_card: TaskCard) -> str:
+    question = task_card.question.strip()
+    if question.lower().startswith("raw:"):
+        return question[4:].strip()
+    if task_card.mode == "raw":
+        return question
+
+    parts = [question]
+    if task_card.context:
+        parts.append(f"补充上下文：{task_card.context}")
+    if task_card.key_terms:
+        parts.append("关键词：" + " ".join(task_card.key_terms[:12]))
+    if task_card.intents:
+        parts.append("任务意图：" + " ".join(task_card.intents))
+    return "\n".join(part for part in parts if part)
+
+
+def _patent_to_public_dict(hit: PatentHit) -> dict[str, Any]:
+    return {
+        "number": hit.number,
+        "patent_number": hit.number,
+        "publication_number": hit.number,
+        "title": hit.title,
+        "abstract": hit.abstract,
+        "applicants": list(hit.applicants),
+        "applicant": "；".join(hit.applicants),
+        "inventors": list(hit.inventors),
+        "inventor": "；".join(hit.inventors),
+        "claims": hit.claims,
+        "publication_date": hit.publication_date,
+        "application_date": hit.application_date,
+        "legal_status": hit.legal_status,
+        "patent_id": hit.patent_id,
+        "url": hit.url,
+        "score": hit.score,
+        "similarity_points": list(hit.similarity_points),
+        "difference_points": list(hit.difference_points),
+        "evidence": [_to_jsonable(item) for item in hit.evidence],
+    }
+
+
+def _build_ranking(public_patents: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    ranking = []
+    for index, patent in enumerate(public_patents, start=1):
+        ranking.append(
+            {
+                "rank": index,
+                "number": patent.get("number", ""),
+                "title": patent.get("title", ""),
+                "score": patent.get("score", 0),
+                "basis": patent.get("similarity_points", [])[:3],
+            }
+        )
+    return ranking
+
+
+def _flatten_points(patents: list[PatentHit], attr: str) -> list[str]:
+    points: list[str] = []
+    for hit in patents[:5]:
+        label = hit.number or hit.title or "未编号专利"
+        for point in getattr(hit, attr):
+            points.append(f"{label}: {point}")
+    return points[:12]
+
+
+def _build_markdown_report(
+    task_card: TaskCard,
+    patents: list[dict[str, Any]],
+    risk_summary: RiskSummary,
+    next_questions: list[str],
+) -> str:
     lines = [
-        note,
-        f"检索式：{query_text}",
-        total_text,
+        "# 专利情报初筛报告",
+        "",
+        f"- 问题：{task_card.question}",
+        f"- 模式：{task_card.mode}",
+        f"- 风险等级：{risk_summary.level}",
+        f"- 风险摘要：{risk_summary.summary}",
+        f"- 不确定性：{risk_summary.uncertainty}",
+        "",
+        "## Top 专利",
     ]
     if patents:
-        lines.append("前几条结果已列在下方。建议下一步根据最接近的申请人、CPC/IPC、权利要求关键词继续收窄。")
+        for item in patents[:10]:
+            label = item.get("number") or "未编号"
+            title = item.get("title") or "未命名"
+            lines.append(f"- {label} | {title} | 相关度 {item.get('score', 0)}")
+    else:
+        lines.append("- 暂无可复核专利命中。")
+    lines.extend(["", "## 下一步追问"])
+    lines.extend(f"- {item}" for item in next_questions)
+    lines.extend(["", risk_summary.disclaimer])
     return "\n".join(lines)
+
+
+def _to_jsonable(value: Any) -> Any:
+    if is_dataclass(value):
+        return {item.name: _to_jsonable(getattr(value, item.name)) for item in fields(value)}
+    if isinstance(value, (list, tuple, set)):
+        return [_to_jsonable(item) for item in value]
+    if isinstance(value, dict):
+        return {str(key): _to_jsonable(item) for key, item in value.items()}
+    return value
+
+
+def _error_message(error: Any) -> str:
+    if isinstance(error, dict):
+        return str(error.get("message") or error.get("detail") or "智慧芽 MCP 调用失败。")
+    return str(error or "智慧芽 MCP 调用失败。")
+
+
+def _legacy_answer(report: dict[str, Any]) -> str:
+    if not report.get("ok"):
+        return f"检索失败：{report.get('error') or '智慧芽 MCP 调用失败。'}"
+    risk = report.get("risk_summary") or {}
+    patents = report.get("patents") or []
+    lines = [
+        "已通过智慧芽 MCP 完成专利情报初筛。",
+        f"检索式/问题：{report.get('query')}",
+        f"返回 Top {len(patents)} 件候选。",
+    ]
+    if isinstance(risk, dict) and risk.get("summary"):
+        lines.append(f"风险摘要：{risk['summary']}")
+    return "\n".join(lines)
+
+
+def _clamp_limit(limit: int) -> int:
+    return max(1, min(int(limit or 10), 50))
 
 
 def main() -> None:
