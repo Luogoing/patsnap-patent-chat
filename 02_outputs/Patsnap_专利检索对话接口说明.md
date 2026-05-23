@@ -119,3 +119,14 @@ TACD: virtual reality AND AN: Meta
 3. 增加导出 Excel/Markdown 报告。
 4. 增加 Hermes skill 或 MCP server，让飞书里的 Hermes 直接调用该检索接口。
 5. 增加查新模板：技术点、关键词、近似专利、风险等级、规避建议。
+
+## 认证错误说明
+
+如果页面提示智慧芽认证失败，而 `/health` 显示 `has_patsnap_api_key=true`，说明本地已经读到 key，但智慧芽服务端拒绝该 key。
+
+已知排查方向：
+
+- 确认该 key 是 Eureka Open Platform 的 REST API Key。
+- 确认账号开通了 Patent Data Search / P001 / P075 等接口权限。
+- 如果复制的是 MCP Key、过期 Key、被禁用 Key 或未授权 Key，需要在智慧芽后台重新生成或联系智慧芽支持开通。
+- 当前项目不会把 key 上传 GitHub，只会读取本地 `.env.local`。

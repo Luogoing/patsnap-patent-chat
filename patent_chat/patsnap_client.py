@@ -56,5 +56,13 @@ class PatsnapClient:
             raise PatsnapAPIError(f"Patsnap API HTTP {response.status_code}: {response.text[:300]}")
         data = response.json()
         if isinstance(data, dict) and data.get("status") is False and data.get("error_code") not in (0, "0", None):
-            raise PatsnapAPIError(f"Patsnap API error {data.get('error_code')}: {data.get('error_msg')}")
+            error_code = str(data.get("error_code"))
+            error_msg = data.get("error_msg")
+            if error_code == "67200202" or error_msg == "apikey auth error!":
+                raise PatsnapAPIError(
+                    "已读取本地 PATSNAP_API_KEY，但智慧芽认证失败。"
+                    "请确认这是 Eureka Open Platform 的 REST API Key，且账号已开通 Patent Data Search 权限；"
+                    "如果你复制的是 MCP Key、过期 Key 或未授权 Key，需要在智慧芽后台重新生成/开通。"
+                )
+            raise PatsnapAPIError(f"Patsnap API error {error_code}: {error_msg}")
         return data

@@ -34,6 +34,8 @@ python -m venv .venv
 .\scripts\set_patsnap_key.ps1
 ```
 
+运行中的服务会自动重新读取 `.env.local`，通常不需要重启。
+
 运行：
 
 ```powershell

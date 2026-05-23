@@ -1,4 +1,3 @@
-from functools import lru_cache
 from pathlib import Path
 
 from dotenv import load_dotenv
@@ -7,8 +6,14 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 ROOT = Path(__file__).resolve().parent.parent
-load_dotenv(ROOT / ".env.local")
-load_dotenv(ROOT / ".env")
+
+
+def load_env_files() -> None:
+    load_dotenv(ROOT / ".env.local", override=True)
+    load_dotenv(ROOT / ".env", override=False)
+
+
+load_env_files()
 
 
 class Settings(BaseSettings):
@@ -30,6 +35,6 @@ class Settings(BaseSettings):
     patsnap_default_limit: int = Field(default=10, alias="PATSNAP_DEFAULT_LIMIT")
 
 
-@lru_cache(maxsize=1)
 def get_settings() -> Settings:
+    load_env_files()
     return Settings()
