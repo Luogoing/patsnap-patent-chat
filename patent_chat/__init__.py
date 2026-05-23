@@ -1,0 +1,1 @@
+"""Patsnap patent chat package."""

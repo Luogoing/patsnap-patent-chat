@@ -1,0 +1,29 @@
+# Secrets
+.env
+.env.*
+!.env.example
+
+# Python
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.venv/
+venv/
+
+# Local runtime
+logs/
+tmp/
+*.log
+solidworks-mcp.log
+03_checks/
+
+# Earlier mistaken large source checkout; keep local, do not publish.
+00_source/HARMES/
+
+# OS/editor
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/

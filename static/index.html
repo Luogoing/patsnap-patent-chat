@@ -1,0 +1,40 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Patsnap Patent Chat</title>
+    <link rel="stylesheet" href="/static/styles.css" />
+  </head>
+  <body>
+    <main class="shell">
+      <section class="workspace">
+        <header class="topbar">
+          <div>
+            <h1>Patsnap Patent Chat</h1>
+            <p>智慧芽 API 驱动的本地专利检索对话接口</p>
+          </div>
+          <a class="link" href="/health" target="_blank" rel="noreferrer">Health</a>
+        </header>
+
+        <section id="messages" class="messages" aria-live="polite">
+          <article class="message assistant">
+            <p>输入技术关键词、公司名、专利号，或用 <code>raw:</code> 直接发送 Patsnap 检索式。</p>
+          </article>
+        </section>
+
+        <form id="chat-form" class="composer">
+          <textarea id="message" rows="3" placeholder="例如：检索氢气瓶复合材料缠绕和泄压阀相关专利"></textarea>
+          <div class="composer-actions">
+            <label>
+              返回条数
+              <input id="limit" type="number" min="1" max="50" value="10" />
+            </label>
+            <button type="submit">检索</button>
+          </div>
+        </form>
+      </section>
+    </main>
+    <script src="/static/app.js"></script>
+  </body>
+</html>
