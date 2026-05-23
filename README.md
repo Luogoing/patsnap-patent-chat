@@ -90,6 +90,7 @@ Invoke-RestMethod -Method Post `
 
 ## 文档产出
 
+- [智慧芽 MCP 使用教程](02_outputs/智慧芽_MCP_使用教程.md)：面向第一次使用者，说明如何启动页面、填写输入项、运行典型查询、阅读结果和处理常见错误。
 - [一期路线图与开源协作草案](02_outputs/Patsnap_MCP_一期路线图与开源协作草案.md)
 - [专利检索对话接口说明](02_outputs/Patsnap_专利检索对话接口说明.md)
 

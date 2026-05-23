@@ -3,7 +3,7 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>Patsnap Patent Intelligence</title>
+    <title>智慧芽专利情报工作台</title>
     <link rel="stylesheet" href="/static/styles.css" />
   </head>
   <body>
@@ -11,16 +11,45 @@
       <section class="workspace" aria-label="专利情报工作台">
         <header class="topbar">
           <div>
-            <h1>Patsnap Patent Intelligence</h1>
-            <p>面向技术方案的专利检索、相似性分析与风险研判工作台</p>
+            <h1>智慧芽专利情报工作台</h1>
+            <p>面向技术方案的专利检索、相似性分析与风险研判</p>
           </div>
           <a class="health-link" href="/api/health" target="_blank" rel="noreferrer">Health</a>
         </header>
 
         <section class="layout">
+          <aside class="guide-panel" aria-label="怎么用">
+            <div class="guide-block">
+              <h2>怎么用</h2>
+              <ol>
+                <li>输入技术方案、申请人或专家检索式。</li>
+                <li>选择检索模式和返回条数。</li>
+                <li>补充产品边界、重点国家、竞争对手等背景。</li>
+                <li>生成后查看 Top 专利、风险摘要、证据和下一步追问。</li>
+              </ol>
+            </div>
+
+            <div class="guide-block">
+              <h2>示例查询</h2>
+              <div class="example-grid">
+                <button type="button" class="example-button" data-example="tsinghua">清华大学蔡临宁</button>
+                <button type="button" class="example-button" data-example="hydrogen">氢气瓶缠绕与泄压阀</button>
+                <button type="button" class="example-button" data-example="raw">raw 专家检索式</button>
+              </div>
+            </div>
+
+            <div class="guide-block">
+              <h2>模式说明</h2>
+              <dl id="mode-help" class="mode-help">
+                <dt>综合检索</dt>
+                <dd>适合第一次摸底，兼顾相关专利、证据和风险。</dd>
+              </dl>
+            </div>
+          </aside>
+
           <form id="intelligence-form" class="input-panel">
             <div class="field-group">
-              <label for="question">技术方案输入</label>
+              <label for="question">技术方案或检索问题</label>
               <textarea
                 id="question"
                 rows="9"
@@ -39,6 +68,7 @@
                   <option value="landscape">技术布局</option>
                   <option value="raw">专家检索式</option>
                 </select>
+                <p id="mode-description" class="help-text">适合第一次摸底，兼顾相关专利、证据和风险。</p>
               </div>
 
               <div class="field-group">
@@ -52,9 +82,11 @@
               <textarea
                 id="context"
                 rows="4"
-                placeholder="可填写申请人、产品边界、重点国家/地区、已知竞品、需要避开的关键词等。"
+                placeholder="可填写申请人、产品边界、重点国家/地区、已知竞品、需要排除或强化的关键词等。"
               ></textarea>
             </div>
+
+            <div id="request-status" class="request-status" role="status" aria-live="polite"></div>
 
             <div class="actions">
               <button id="submit-button" type="submit">生成结果报告</button>
@@ -64,7 +96,7 @@
           <section class="report-panel" aria-live="polite">
             <div id="empty-state" class="empty-state">
               <h2>结果报告</h2>
-              <p>提交技术方案后，这里会显示任务卡、Top 专利、相似点/差异点、风险摘要、证据、下一步追问和 trace_id。</p>
+              <p>提交后这里会显示任务卡、状态摘要、Top 专利、相似点/差异点、风险摘要、证据、下一步追问和 trace_id。</p>
             </div>
             <div id="report" class="report hidden"></div>
           </section>
