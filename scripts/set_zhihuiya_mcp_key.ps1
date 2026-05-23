@@ -21,7 +21,9 @@ if (Test-Path -LiteralPath $target) {
     $_ -notmatch '^ZHIHUIYA_MCP_API_KEY=' -and
     $_ -notmatch '^ZHIHUIYA_MCP_URL=' -and
     $_ -notmatch '^ZHIHUIYA_MCP_TIMEOUT=' -and
-    $_ -notmatch '^ZHIHUIYA_MCP_DEFAULT_LIMIT='
+    $_ -notmatch '^ZHIHUIYA_MCP_DEFAULT_LIMIT=' -and
+    $_ -notmatch '^ZHIHUIYA_NOVELTY_MCP_URL=' -and
+    $_ -notmatch '^ZHIHUIYA_NOVELTY_MCP_API_KEY='
   }
 }
 
@@ -29,6 +31,8 @@ $lines += "ZHIHUIYA_MCP_URL=https://connect.zhihuiya.com/2b0355/logic-mcp"
 $lines += "ZHIHUIYA_MCP_API_KEY=$plain"
 $lines += "ZHIHUIYA_MCP_TIMEOUT=30"
 $lines += "ZHIHUIYA_MCP_DEFAULT_LIMIT=10"
+$lines += "ZHIHUIYA_NOVELTY_MCP_URL=https://connect.zhihuiya.com/bec69d/mcp"
+$lines += "ZHIHUIYA_NOVELTY_MCP_API_KEY=$plain"
 
 Set-Content -LiteralPath $target -Value $lines -Encoding UTF8
 Write-Host "Saved local Zhihuiya MCP config to .env.local (ignored by git)."

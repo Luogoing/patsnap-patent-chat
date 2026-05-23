@@ -36,6 +36,8 @@ scripts/set_zhihuiya_mcp_key.ps1 本地密钥写入脚本
 ```text
 ZHIHUIYA_MCP_URL=https://connect.zhihuiya.com/2b0355/logic-mcp
 ZHIHUIYA_MCP_API_KEY=your_local_key_here
+ZHIHUIYA_NOVELTY_MCP_URL=https://connect.zhihuiya.com/bec69d/mcp
+ZHIHUIYA_NOVELTY_MCP_API_KEY=your_local_key_here
 ```
 
 代码会在内存中把 API key 作为 MCP 连接参数使用，但不会把完整带密钥 URL 写入代码、README、Git 或日志。
@@ -54,6 +56,10 @@ ZHIHUIYA_MCP_API_KEY=your_local_key_here
 - `mcp.connectable`
 - `mcp.tool_count`
 - `mcp.error`
+- `channels.patent_search`
+- `channels.novelty_search`
+
+`patent_search` 对应智慧芽专利搜索，`novelty_search` 对应专利查新。`GET /api/health` 会分别检查两个通道。
 
 ### `POST /api/intelligence`
 

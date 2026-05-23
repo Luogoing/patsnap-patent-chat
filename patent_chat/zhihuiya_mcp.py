@@ -308,11 +308,20 @@ SessionFactory = Callable[[], Any]
 
 
 class ZhihuiyaMCPClient:
-    def __init__(self, settings: Settings, session_factory: SessionFactory | None = None):
+    def __init__(
+        self,
+        settings: Settings,
+        session_factory: SessionFactory | None = None,
+        *,
+        base_url: str | None = None,
+        api_key: str | None = None,
+        channel: str = "patent_search",
+    ):
         self.base_url, self.api_key = clean_mcp_url_and_key(
-            settings.zhihuiya_mcp_url,
-            settings.zhihuiya_mcp_api_key,
+            settings.zhihuiya_mcp_url if base_url is None else base_url,
+            settings.zhihuiya_mcp_api_key if api_key is None else api_key,
         )
+        self.channel = channel
         self.timeout = max(1.0, float(settings.zhihuiya_mcp_timeout))
         self.default_limit = _clamp_limit(None, settings.zhihuiya_mcp_default_limit)
         self._session_factory = session_factory
@@ -372,7 +381,14 @@ class ZhihuiyaMCPClient:
         if not tools.get("ok"):
             return tools
         tool_list = tools["data"]["tools"]
-        return _result_ok({"status": "ok", "tool_count": len(tool_list), "base_url": self.base_url})
+        return _result_ok(
+            {
+                "status": "ok",
+                "tool_count": len(tool_list),
+                "base_url": self.base_url,
+                "channel": self.channel,
+            }
+        )
 
     async def list_tools(self) -> dict[str, Any]:
         missing = self._missing_key_error()
@@ -432,9 +448,10 @@ class ZhihuiyaMCPClient:
             args = _build_search_arguments(search_tool, query, safe_limit)
             response = await _maybe_await(session.call_tool(search_tool["name"], args))
 
-        data = normalize_search_result(response, query, safe_limit, self.api_key)
-        data["tool"] = search_tool["name"]
-        return _result_ok(data)
+            data = normalize_search_result(response, query, safe_limit, self.api_key)
+            data["tool"] = search_tool["name"]
+            data["channel"] = self.channel
+            return _result_ok(data)
 
     async def _preflight_platform_error(self) -> dict[str, Any] | None:
         timeout = min(self.timeout, 10.0)

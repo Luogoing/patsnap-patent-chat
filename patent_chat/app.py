@@ -10,7 +10,7 @@ from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
-from .config import ROOT, get_settings
+from .config import ROOT, Settings, get_settings
 from .intelligence import (
     PatentHit,
     RiskSummary,
@@ -70,23 +70,28 @@ async def health() -> dict[str, Any]:
 @app.get("/api/health")
 async def api_health() -> dict[str, Any]:
     settings = get_settings()
-    client = ZhihuiyaMCPClient(settings)
-    remote = await client.health()
-    data = remote.get("data") or {}
-    error = remote.get("error")
-
-    return {
-        "ok": bool(remote.get("ok")),
-        "service": "zhihuiya-mcp-patent-intelligence",
-        "mcp": {
-            "configured": bool(client.base_url and client.api_key),
-            "has_url": bool(client.base_url),
-            "has_api_key": bool(client.api_key),
-            "base_url": client.base_url,
+    channels = {}
+    for channel in _configured_clients(settings):
+        remote = await channel["client"].health()
+        data = remote.get("data") or {}
+        channels[channel["name"]] = {
+            "configured": bool(channel["client"].base_url and channel["client"].api_key),
+            "has_url": bool(channel["client"].base_url),
+            "has_api_key": bool(channel["client"].api_key),
+            "base_url": channel["client"].base_url,
             "connectable": bool(remote.get("ok")),
             "tool_count": data.get("tool_count", 0),
-            "error": error,
-        },
+            "error": remote.get("error"),
+        }
+
+    primary = channels.get("patent_search", {})
+    ok = any(item.get("connectable") for item in channels.values())
+
+    return {
+        "ok": ok,
+        "service": "zhihuiya-mcp-patent-intelligence",
+        "mcp": primary,
+        "channels": channels,
         "legacy_rest_configured": bool(settings.patsnap_api_key),
     }
 
@@ -131,8 +136,13 @@ async def run_intelligence(question: str, mode: str = "balanced", limit: int = 1
     query = _build_mcp_query(task_card)
 
     settings = get_settings()
-    client = ZhihuiyaMCPClient(settings)
-    mcp_response = await client.search(query=query, limit=safe_limit)
+    primary = _client_for_mode(settings, task_card.mode)
+    mcp_response = await primary.search(query=query, limit=safe_limit)
+    selected_client = primary
+    if _should_fallback_to_novelty(mcp_response, settings, task_card.mode):
+        fallback = _novelty_client(settings)
+        mcp_response = await fallback.search(query=query, limit=safe_limit)
+        selected_client = fallback
 
     if not mcp_response.get("ok"):
         risk_summary = build_risk_summary(task_card, [])
@@ -143,6 +153,7 @@ async def run_intelligence(question: str, mode: str = "balanced", limit: int = 1
             query=query,
             patents=[],
             risk_summary=risk_summary,
+            tool=selected_client.channel,
             error=mcp_response.get("error") or {"message": "智慧芽 MCP 调用失败。"},
         )
 
@@ -163,6 +174,7 @@ async def run_intelligence(question: str, mode: str = "balanced", limit: int = 1
         risk_summary=risk_summary,
         tool=data.get("tool", ""),
         mcp_count=len(hits),
+        channel=data.get("channel", selected_client.channel),
     )
 
 
@@ -175,6 +187,7 @@ def _make_response(
     patents: list[PatentHit],
     risk_summary: RiskSummary,
     tool: str = "",
+    channel: str = "",
     mcp_count: int = 0,
     error: Any = None,
 ) -> dict[str, Any]:
@@ -192,6 +205,7 @@ def _make_response(
         "query": query,
         "search_query": query,
         "mode": task_card.mode,
+        "channel": channel or tool,
         "tool": tool,
         "mcp_count": mcp_count,
         "patents": public_patents,
@@ -211,6 +225,45 @@ def _make_response(
         if isinstance(error_payload, dict):
             response["error_code"] = error_payload.get("code", "")
     return response
+
+
+def _configured_clients(settings: Settings) -> list[dict[str, Any]]:
+    return [
+        {"name": "patent_search", "client": _patent_search_client(settings)},
+        {"name": "novelty_search", "client": _novelty_client(settings)},
+    ]
+
+
+def _patent_search_client(settings: Settings) -> ZhihuiyaMCPClient:
+    return ZhihuiyaMCPClient(settings, channel="patent_search")
+
+
+def _novelty_client(settings: Settings) -> ZhihuiyaMCPClient:
+    api_key = settings.zhihuiya_novelty_mcp_api_key or settings.zhihuiya_mcp_api_key
+    return ZhihuiyaMCPClient(
+        settings,
+        base_url=settings.zhihuiya_novelty_mcp_url,
+        api_key=api_key,
+        channel="novelty_search",
+    )
+
+
+def _client_for_mode(settings: Settings, mode: str) -> ZhihuiyaMCPClient:
+    if (mode or "").lower() in {"novelty", "infringement", "risk"}:
+        return _novelty_client(settings)
+    return _patent_search_client(settings)
+
+
+def _should_fallback_to_novelty(response: dict[str, Any], settings: Settings, mode: str) -> bool:
+    if response.get("ok"):
+        return False
+    if (mode or "").lower() in {"novelty", "infringement", "risk"}:
+        return False
+    error = response.get("error") or {}
+    if error.get("code") not in {"permission_denied", "tool_not_found"}:
+        return False
+    novelty_key = settings.zhihuiya_novelty_mcp_api_key or settings.zhihuiya_mcp_api_key
+    return bool(settings.zhihuiya_novelty_mcp_url and novelty_key)
 
 
 def _build_mcp_query(task_card: TaskCard) -> str:

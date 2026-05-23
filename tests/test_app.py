@@ -1,4 +1,5 @@
-from patent_chat.app import _build_mcp_query, _make_response
+from patent_chat.app import _build_mcp_query, _client_for_mode, _make_response, _should_fallback_to_novelty
+from patent_chat.config import Settings
 from patent_chat.intelligence import build_risk_summary, build_task_card
 
 
@@ -33,3 +34,30 @@ def test_intelligence_error_response_has_required_schema_and_redacts_secret():
     assert response["risk_summary"]["level"] == "unknown"
     assert response["error_code"] == "auth_failed"
     assert "test_key_placeholder" not in str(response)
+
+
+def test_novelty_mode_selects_novelty_mcp_channel():
+    settings = Settings(
+        ZHIHUIYA_MCP_URL="https://example.test/search",
+        ZHIHUIYA_MCP_API_KEY="main_key",
+        ZHIHUIYA_NOVELTY_MCP_URL="https://example.test/novelty",
+        ZHIHUIYA_NOVELTY_MCP_API_KEY="novelty_key",
+    )
+
+    client = _client_for_mode(settings, "novelty")
+
+    assert client.channel == "novelty_search"
+    assert client.base_url == "https://example.test/novelty"
+    assert client.api_key == "novelty_key"
+
+
+def test_permission_denied_can_fallback_to_novelty_channel():
+    settings = Settings(
+        ZHIHUIYA_MCP_URL="https://example.test/search",
+        ZHIHUIYA_MCP_API_KEY="main_key",
+        ZHIHUIYA_NOVELTY_MCP_URL="https://example.test/novelty",
+    )
+    response = {"ok": False, "error": {"code": "permission_denied"}}
+
+    assert _should_fallback_to_novelty(response, settings, "balanced") is True
+    assert _should_fallback_to_novelty(response, settings, "novelty") is False

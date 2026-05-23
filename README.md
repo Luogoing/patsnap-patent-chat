@@ -34,6 +34,8 @@ python -m venv .venv
 ```text
 ZHIHUIYA_MCP_URL=https://connect.zhihuiya.com/2b0355/logic-mcp
 ZHIHUIYA_MCP_API_KEY=your_local_key_here
+ZHIHUIYA_NOVELTY_MCP_URL=https://connect.zhihuiya.com/bec69d/mcp
+ZHIHUIYA_NOVELTY_MCP_API_KEY=your_local_key_here
 ```
 
 启动服务：
@@ -69,6 +71,8 @@ Invoke-RestMethod -Method Post `
 - `infringement`：侵权或 FTO 风险初筛。
 - `landscape`：技术布局观察。
 - `raw`：直接把输入作为智慧芽检索式发送。
+
+后端会按模式选择 MCP 通道：`balanced` / `landscape` 默认走「智慧芽专利搜索」，`novelty` / `infringement` 走「专利查新」。如果专利搜索通道返回权限不足，后端会尝试用专利查新通道兜底。
 
 ## 密钥安全
 

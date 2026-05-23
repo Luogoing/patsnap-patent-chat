@@ -40,6 +40,11 @@ class Settings(BaseSettings):
     zhihuiya_mcp_api_key: str = Field(default="", alias="ZHIHUIYA_MCP_API_KEY")
     zhihuiya_mcp_timeout: float = Field(default=30.0, alias="ZHIHUIYA_MCP_TIMEOUT")
     zhihuiya_mcp_default_limit: int = Field(default=10, alias="ZHIHUIYA_MCP_DEFAULT_LIMIT")
+    zhihuiya_novelty_mcp_url: str = Field(
+        default="https://connect.zhihuiya.com/bec69d/mcp",
+        alias="ZHIHUIYA_NOVELTY_MCP_URL",
+    )
+    zhihuiya_novelty_mcp_api_key: str = Field(default="", alias="ZHIHUIYA_NOVELTY_MCP_API_KEY")
 
 
 def get_settings() -> Settings:
