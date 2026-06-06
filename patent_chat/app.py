@@ -65,7 +65,7 @@ class SelfTestRequest(BaseModel):
     limit: int = Field(default=3, ge=1, le=10)
 
 
-app = FastAPI(title="Zhihuiya MCP Patent Intelligence", version="1.0.0")
+app = FastAPI(title="专利情报产品开发实验平台", version="1.0.0")
 app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
 
 
